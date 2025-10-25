@@ -1,0 +1,16 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+backend/.venv/
+backend/db.sqlite3
+*.pyc
+__pycache__/
+.DS_Store
+.env
+backend/.env
+frontend/.env
+dist/
+frontend/dist/
+.vite/
+frontend/.vite/
+coverage/
