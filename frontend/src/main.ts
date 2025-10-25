@@ -11,12 +11,15 @@ import Home from './pages/Home.vue'
 import Play from './pages/Play.vue'
 import Results from './pages/Results.vue'
 import Ranking from './pages/Ranking.vue'
+import Admin from './pages/Admin.vue'
 
 const routes = [
   { path: '/', component: Home },
   { path: '/play', component: Play },
   { path: '/results', component: Results },
   { path: '/ranking', component: Ranking },
+  // Ruta de administración (no enlazada en navegación pública)
+  { path: '/admin', component: Admin },
 ]
 
 const router = createRouter({
