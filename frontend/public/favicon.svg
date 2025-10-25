@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" role="img" aria-label="Urna con bandera argentina y mano votando">
+  <defs>
+    <linearGradient id="bg" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0" stop-color="#00AEEF"/>
+      <stop offset="1" stop-color="#0077C8"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Fondo redondeado celeste-azul -->
+  <rect width="256" height="256" rx="44" fill="url(#bg)"/>
+
+  <!-- Boleta (papel) parcialmente insertada -->
+  <rect x="108" y="64" width="72" height="48" rx="6" fill="#FFFFFF" stroke="#E6EEF5" stroke-width="2" transform="rotate(-15 144 88)"/>
+
+  <!-- Mano estilizada que deposita la boleta -->
+  <g transform="rotate(-15 170 92)">
+    <!-- brazo -->
+    <rect x="150" y="86" width="48" height="18" rx="9" fill="#F9C000"/>
+    <!-- palma -->
+    <circle cx="198" cy="95" r="12" fill="#F9C000"/>
+    <!-- pulgar -->
+    <rect x="182" y="88" width="16" height="10" rx="5" fill="#F9C000" transform="rotate(-25 190 93)"/>
+  </g>
+
+  <!-- Urna -->
+  <g>
+    <!-- caja -->
+    <rect x="56" y="112" width="144" height="96" rx="14" fill="#FFFFFF"/>
+    <!-- ranura -->
+    <rect x="88" y="112" width="80" height="10" rx="5" fill="#99BBD3"/>
+
+    <!-- bandera argentina en la cara frontal de la urna -->
+    <g transform="translate(80,152)">
+      <rect width="96" height="40" rx="4" fill="#FFFFFF"/>
+      <rect width="96" height="12" fill="#74ACDF"/>
+      <rect y="28" width="96" height="12" fill="#74ACDF"/>
+      <circle cx="48" cy="20" r="6" fill="#F6B40E"/>
+    </g>
+  </g>
+
+  <!-- sutil brillo -->
+  <path d="M20 56c26-22 60-34 108-36 56-3 96 8 122 30v0c-10-6-38-9-71-10-53-2-103 4-159 16z" fill="#FFFFFF" opacity="0.08"/>
+</svg>

@@ -24,6 +24,21 @@ const router = createRouter({
   routes,
 })
 
+const argentinaTheme = {
+  dark: false,
+  colors: {
+    primary: '#00AEEF',       // Celeste
+    secondary: '#F9C000',     // Amarillo dorado
+    accent: '#0077C8',        // Azul bandera
+    info: '#4FC3F7',
+    success: '#2E7D32',
+    warning: '#F9A825',
+    error: '#C62828',
+    background: '#F5FBFF',
+    surface: '#FFFFFF',
+  },
+}
+
 const vuetify = createVuetify({
   components,
   directives,
@@ -31,6 +46,19 @@ const vuetify = createVuetify({
     defaultSet: 'mdi',
     aliases,
     sets: { mdi },
+  },
+  theme: {
+    defaultTheme: 'argentina',
+    themes: {
+      argentina: argentinaTheme as any,
+    },
+  },
+  defaults: {
+    VAppBar: { color: 'primary', elevation: 2 },
+    VBtn: { rounded: 'lg' },
+    VCard: { rounded: 'lg' },
+    VChip: { variant: 'tonal' },
+    VAlert: { border: 'start', elevation: 0 },
   },
 })
 

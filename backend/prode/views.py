@@ -30,11 +30,17 @@ class PredictionMineView(APIView):
         if not email:
             return JsonResponse({'detail': 'email requerido'}, status=400)
         email = email.strip().lower()
+        soft = request.GET.get('soft')
         try:
             p = Prediction.objects.get(email=email)
         except Prediction.DoesNotExist:
+            if soft:
+                return JsonResponse({'exists': False, 'prediction': None})
             return JsonResponse({'detail': 'no encontrado'}, status=404)
-        return JsonResponse(PredictionSerializer(p).data)
+        data = PredictionSerializer(p).data
+        if soft:
+            return JsonResponse({'exists': True, 'prediction': data})
+        return JsonResponse(data)
 
 
 class PredictionUpsertView(APIView):
@@ -93,3 +99,25 @@ class HealthView(APIView):
             'db': db,
             'deadline': app_settings.DEADLINE,
         })
+
+
+class PlayersView(APIView):
+    def get(self, request: Request):
+        # MVP completion criterion: user completed Top-3 (3 fuerzas)
+        # Completed = has any relevant content: top3, some national percentage > 0, or any provinciales filled
+        names = []
+        for p in Prediction.objects.order_by('-updated_at').only('username','top3','national_percentages','provinciales'):
+            if not p.username:
+                continue
+            t3 = p.top3 or []
+            nat = p.national_percentages or {}
+            prov = p.provinciales or {}
+            nat_sum = 0.0
+            try:
+                nat_sum = sum(float(v) for v in nat.values()) if nat else 0.0
+            except Exception:
+                nat_sum = 0.0
+            if (len(t3) > 0) or (nat_sum > 0) or (bool(prov)):
+                names.append(p.username)
+        total = Prediction.objects.count()
+        return JsonResponse({'count_completed': len(names), 'usernames': names, 'count_total': total})

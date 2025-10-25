@@ -1,6 +1,9 @@
 <template>
   <div class="pa-4">
-    <h2 class="mb-4">Pronóstico (MVP)</h2>
+    <div class="d-flex align-center mb-3">
+      <v-avatar size="40" class="mr-3" color="secondary"><span style="font-size:22px;">🗳️</span></v-avatar>
+      <h2 class="mb-0 text-primary">Pronóstico (MVP)</h2>
+    </div>
 
     <!-- Identificación modal -->
     <v-dialog v-model="showIdDialog" persistent max-width="520">
@@ -20,7 +23,7 @@
     </v-dialog>
 
     <!-- Stepper -->
-    <v-stepper v-model="step">
+  <v-stepper v-model="step" color="primary">
       <v-stepper-header>
         <v-stepper-item :value="1" title="Identificación" :complete="identified" />
         <v-divider></v-divider>
@@ -47,7 +50,9 @@
 
         <!-- Paso 2: Nacional -->
         <v-stepper-window-item :value="2">
-          <v-form @submit.prevent="goToSummary">
+          <v-card variant="outlined" class="mb-4">
+            <v-card-text>
+              <v-form @submit.prevent="goToSummary">
             <h3 class="mb-2">Top-3 fuerzas</h3>
             <v-select v-model="form.top3" :items="fuerzas" label="Seleccioná hasta 3" multiple chips :counter="3" :rules="[max3]" :disabled="afterDeadline" />
 
@@ -78,11 +83,13 @@
             </v-row>
 
             <div class="my-4 d-flex align-center gap-3">
-              <v-btn variant="text" @click="step = 1">Atrás</v-btn>
+              <v-btn variant="text" @click="step = 1">← Atrás</v-btn>
               <v-spacer />
-              <v-btn color="primary" @click="step = 3" :disabled="afterDeadline">Continuar</v-btn>
+              <v-btn color="primary" @click="step = 3" :disabled="afterDeadline">Continuar →</v-btn>
             </div>
-          </v-form>
+              </v-form>
+            </v-card-text>
+          </v-card>
         </v-stepper-window-item>
 
         <!-- Paso 3: Provinciales -->
@@ -113,9 +120,9 @@
           </div>
 
           <div class="my-4 d-flex align-center gap-3">
-            <v-btn variant="text" @click="step = 2">Atrás</v-btn>
+            <v-btn variant="text" @click="step = 2">← Atrás</v-btn>
             <v-spacer />
-            <v-btn color="primary" @click="step = 4" :disabled="afterDeadline">Continuar</v-btn>
+            <v-btn color="primary" @click="step = 4" :disabled="afterDeadline">Continuar →</v-btn>
           </div>
         </v-stepper-window-item>
 
@@ -182,9 +189,9 @@
           </v-card>
 
           <div class="my-4 d-flex align-center gap-3">
-            <v-btn variant="text" @click="step = 3">Atrás</v-btn>
+            <v-btn variant="text" @click="step = 3">← Atrás</v-btn>
             <v-spacer />
-            <v-btn color="primary" :loading="loading" @click="save" :disabled="afterDeadline">Guardar</v-btn>
+            <v-btn color="primary" :loading="loading" @click="save" :disabled="afterDeadline">💾 Guardar</v-btn>
           </div>
           <div class="mt-2" v-if="savedAt">
             Guardado a las {{ savedAt }}
@@ -199,7 +206,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref, computed } from 'vue'
+import { onMounted, reactive, ref, computed, watch } from 'vue'
 import axios from 'axios'
 
 const fuerzas = ref<string[]>([])
@@ -271,10 +278,14 @@ async function preload() {
   if (!form.email) return
   try {
     const base = import.meta.env.VITE_API_BASE
-    const { data } = await axios.get(`${base}/api/predictions/mine`, { params: { email: form.email } })
-    Object.assign(form, data)
-    savedAt.value = new Date(data.updated_at).toLocaleTimeString()
-    syncPending.value = !!data.sync_pending
+    const { data } = await axios.get(`${base}/api/predictions/mine`, { params: { email: form.email, soft: 1 } })
+    if (data?.exists && data?.prediction) {
+      Object.assign(form, data.prediction)
+      savedAt.value = new Date(data.prediction.updated_at).toLocaleTimeString()
+      syncPending.value = !!data.prediction.sync_pending
+    } else {
+      idNotice.value = 'No encontramos un pronóstico previo para este email, vamos a crear uno nuevo.'
+    }
     identified.value = true
     step.value = 2
     // asegurar estructura provinciales completa
@@ -285,13 +296,13 @@ async function preload() {
       }
     }
   } catch (err: any) {
-    // ignore 404, rethrow other errors
-    if (!(err?.response && err.response.status === 404)) {
-      throw err
+    // rethrow unknown errors
+    if (!(err?.response)) {
+      const msg = err?.response?.data?.detail || err?.message || 'Error al precargar tus datos. Probá nuevamente.'
+      error.value = msg
+      return
     }
-    // si no existe, seguimos como nueva carga
     identified.value = true
-    idNotice.value = 'No encontramos un pronóstico previo para este email, vamos a crear uno nuevo.'
     step.value = 2
   }
 }
@@ -304,8 +315,12 @@ async function save() {
     const { data } = await axios.post(`${base}/api/predictions`, form)
     savedAt.value = new Date(data.updated_at).toLocaleTimeString()
     syncPending.value = !!data.sync_pending
+    try { localStorage.setItem('prode_email', form.email); localStorage.setItem('prode_name', form.username) } catch {}
   } catch (e: any) {
-    error.value = e?.response?.data || 'Error al guardar'
+    const d = e?.response?.data
+    if (typeof d === 'string') error.value = d
+    else if (d && typeof d === 'object') error.value = JSON.stringify(d)
+    else error.value = 'Error al guardar'
   } finally {
     loading.value = false
   }
@@ -337,6 +352,10 @@ onMounted(() => {
   } catch {}
   if (!form.email) showIdDialog.value = true
 })
+
+// Persiste cambios de nombre/email en localStorage para mejorar la resiliencia
+watch(() => form.email, (v) => { try { if (v) localStorage.setItem('prode_email', v) } catch {} })
+watch(() => form.username, (v) => { try { if (v) localStorage.setItem('prode_name', v) } catch {} })
 
 function goToSummary() {
   step.value = 4
