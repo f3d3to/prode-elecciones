@@ -256,7 +256,7 @@ function max3(val: unknown) {
 }
 
 async function loadMetadata() {
-  const base = import.meta.env.VITE_API_BASE
+  const base = String(import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '')
   const { data } = await axios.get(`${base}/api/metadata`)
   fuerzas.value = data.fuerzas || []
   provincias.value = data.provincias || []
@@ -280,7 +280,7 @@ async function loadMetadata() {
 async function preload() {
   if (!form.email) return
   try {
-    const base = import.meta.env.VITE_API_BASE
+  const base = String(import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '')
     const { data } = await axios.get(`${base}/api/predictions/mine`, { params: { email: form.email, soft: 1 } })
     if (data?.exists && data?.prediction) {
       Object.assign(form, data.prediction)
@@ -314,7 +314,7 @@ async function save() {
   error.value = ''
   loading.value = true
   try {
-    const base = import.meta.env.VITE_API_BASE
+  const base = String(import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '')
     const { data } = await axios.post(`${base}/api/predictions`, form)
     savedAt.value = new Date(data.updated_at).toLocaleTimeString()
     syncPending.value = !!data.sync_pending

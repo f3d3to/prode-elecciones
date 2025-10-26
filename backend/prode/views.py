@@ -46,9 +46,18 @@ class PredictionMineView(APIView):
             return JsonResponse({'detail': 'email requerido'}, status=400)
         email = email.strip().lower()
         soft = request.GET.get('soft')
+        # Evitar 500 por duplicados: tomamos el último por updated_at
         try:
-            p = Prediction.objects.get(email=email)
-        except Prediction.DoesNotExist:
+            p = (
+                Prediction.objects.filter(email=email)
+                .order_by('-updated_at')
+                .first()
+            )
+        except Exception as e:
+            # Log simple para Render
+            print(f"PredictionMineView error querying email={email}: {type(e).__name__}: {e}")
+            p = None
+        if not p:
             if soft:
                 return JsonResponse({'exists': False, 'prediction': None})
             return JsonResponse({'detail': 'no encontrado'}, status=404)
@@ -118,24 +127,39 @@ class HealthView(APIView):
 
 class PlayersView(APIView):
     def get(self, request: Request):
-        # MVP completion criterion: user completed Top-3 (3 fuerzas)
-        # Completed = has any relevant content: top3, some national percentage > 0, or any provinciales filled
-        names = []
-        for p in Prediction.objects.order_by('-updated_at').only('username','top3','national_percentages','provinciales'):
-            if not p.username:
-                continue
-            t3 = p.top3 or []
-            nat = p.national_percentages or {}
-            prov = p.provinciales or {}
-            nat_sum = 0.0
+        try:
+            # MVP completion criterion: user completed Top-3 (3 fuerzas)
+            # Completed = has any relevant content: top3, some national percentage > 0, or any provinciales filled
+            names = []
+            qs = Prediction.objects.order_by('-updated_at').only('username','top3','national_percentages','provinciales')
+            for p in qs.iterator():
+                try:
+                    if not p.username:
+                        continue
+                    t3 = p.top3 or []
+                    nat = p.national_percentages or {}
+                    prov = p.provinciales or {}
+                    nat_sum = 0.0
+                    try:
+                        nat_sum = sum(float(v) for v in getattr(nat, 'values', lambda: [])()) if nat else 0.0
+                    except Exception:
+                        nat_sum = 0.0
+                    if (len(t3) > 0) or (nat_sum > 0) or (bool(prov)):
+                        names.append(p.username)
+                except Exception as row_err:
+                    # Evitar que un registro corrupto rompa el listado completo
+                    print(f"PlayersView row error id={getattr(p, 'id', None)}: {type(row_err).__name__}: {row_err}")
+                    continue
+            total = Prediction.objects.count()
+            return JsonResponse({'count_completed': len(names), 'usernames': names, 'count_total': total})
+        except Exception as e:
+            # Fallback seguro ante cualquier error no esperado
+            print(f"PlayersView failed: {type(e).__name__}: {e}")
             try:
-                nat_sum = sum(float(v) for v in nat.values()) if nat else 0.0
+                total = Prediction.objects.count()
             except Exception:
-                nat_sum = 0.0
-            if (len(t3) > 0) or (nat_sum > 0) or (bool(prov)):
-                names.append(p.username)
-        total = Prediction.objects.count()
-        return JsonResponse({'count_completed': len(names), 'usernames': names, 'count_total': total})
+                total = 0
+            return JsonResponse({'count_completed': 0, 'usernames': [], 'count_total': total})
 
 
 class OfficialResultsView(APIView):

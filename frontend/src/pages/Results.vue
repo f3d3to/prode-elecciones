@@ -101,7 +101,7 @@ function fmtInt(v: any) {
 }
 
 onMounted(async () => {
-  const base = import.meta.env.VITE_API_BASE
+  const base = String(import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '')
   try {
     const { data } = await axios.get(`${base}/api/results`)
     results.value = {

@@ -86,9 +86,9 @@ function fmtDate(iso: string) {
 async function fetchRanking() {
   loading.value = true
   error.value = ''
-  const base = import.meta.env.VITE_API_BASE
+  const base = String(import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '')
   try {
-    const url = query.value ? `${base}/api/ranking?q=${encodeURIComponent(query.value)}` : `${base}/api/ranking`
+  const url = query.value ? `${base}/api/ranking?q=${encodeURIComponent(query.value)}` : `${base}/api/ranking`
     const { data } = await axios.get(url)
     items.value = data.results || []
     generatedAt.value = new Date(data.generated_at || Date.now()).toLocaleString('es-AR')

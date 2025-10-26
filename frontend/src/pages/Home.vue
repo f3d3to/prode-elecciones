@@ -126,7 +126,7 @@ onMounted(() => {
   timer = globalThis.setInterval(update, 1000)
   if (closedByGuard) simulatedNote.value = 'Redirigido: cerraron los comicios.'
   // ping API health once
-  const base = import.meta.env.VITE_API_BASE
+  const base = String(import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '')
   axios.get(`${base}/api/health`).then(() => apiOk.value = true).catch(() => apiOk.value = false)
   // fetch players
   axios.get(`${base}/api/players`).then((res) => {
