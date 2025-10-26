@@ -2,7 +2,7 @@
   <div class="pa-4">
     <div class="d-flex align-center mb-3">
       <v-avatar size="40" class="mr-3" color="secondary"><span style="font-size:22px;">🗳️</span></v-avatar>
-      <h2 class="mb-0 text-primary">Pronóstico (MVP)</h2>
+      <h2 class="mb-0 text-primary">Pronóstico</h2>
     </div>
     <v-alert v-if="afterDeadline" type="error" variant="tonal" class="mb-3">
       Cerraron los comicios — edición deshabilitada.

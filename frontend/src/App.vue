@@ -61,7 +61,7 @@
           <a href="https://www.linkedin.com/in/federico-j-neuman/" target="_blank" rel="noopener" class="link">LinkedIn</a>
         </div>
         <div class="footer-right">
-          <span>MVP 2025</span>
+          <span>2025</span>
         </div>
       </div>
     </v-footer>

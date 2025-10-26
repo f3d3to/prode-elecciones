@@ -4,13 +4,13 @@
       <v-avatar size="64" class="mb-2" color="secondary">
         <v-icon icon="mdi-shield-account" size="36" class="text-white" />
       </v-avatar>
-      <h2 class="mb-1 text-primary">Administración</h2>
+      <h2 class="mb-1 text-primary">Ingresos</h2>
     </div>
 
     <div v-if="!auth.authenticated" class="mx-auto" style="max-width: 520px;">
       <v-alert v-if="auth.error" type="error" variant="tonal" class="mb-3">{{ auth.error }}</v-alert>
       <v-card class="mb-4">
-        <v-card-title>Ingreso de staff</v-card-title>
+        <v-card-title>Ingreso</v-card-title>
         <v-card-text>
           <v-text-field v-model="auth.username" label="Usuario" />
           <v-text-field v-model="auth.password" label="Contraseña" type="password" />

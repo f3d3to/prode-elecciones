@@ -24,8 +24,11 @@
     <div v-else class="mx-auto" style="max-width: 980px;">
       <v-card elevation="1">
         <v-card-text>
-          <div class="text-medium-emphasis mb-2">{{ items.length }} participantes • Generado: {{ generatedAt }}</div>
-          <v-table density="comfortable">
+          <div class="text-medium-emphasis mb-2">{{ items.length }} participantes<span v-if="generatedAt"> • Generado: {{ generatedAt }}</span></div>
+          <v-alert v-if="items.length === 0" type="info" variant="tonal">
+            A la espera de resultados oficiales o no hay participantes para mostrar.
+          </v-alert>
+          <v-table v-else density="comfortable">
             <thead>
               <tr>
                 <th scope="col" class="text-left">Pos.</th>
