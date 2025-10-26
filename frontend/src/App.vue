@@ -74,7 +74,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onBeforeUnmount } from 'vue'
 
-const urnaSrc = ref('/urna_voto.png')
+// Para evitar 404 en consola si no está la imagen grande, usamos por defecto el favicon SVG
+const urnaSrc = ref('/favicon.svg')
 function onUrnaError() {
   // Si la PNG es muy grande o no existe, utilizamos el SVG del favicon como fallback
   if (urnaSrc.value !== '/favicon.svg') {

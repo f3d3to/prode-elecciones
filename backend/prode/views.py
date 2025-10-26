@@ -76,6 +76,12 @@ class PredictionUpsertView(APIView):
         if 'email' in data and isinstance(data['email'], str):
             data['email'] = data['email'].strip().lower()
 
+        # Normalizar nulos a estructuras vacías para evitar errores de tipo
+        if data.get('provinciales') is None:
+            data['provinciales'] = {}
+        if data.get('bonus') is None:
+            data['bonus'] = {}
+
         fuerzas = get_fuerzas()
         provincias = get_provincias()
 
@@ -95,10 +101,15 @@ class PredictionUpsertView(APIView):
         if err:
             return JsonResponse({'bonus': err}, status=400)
 
-        try:
-            inst = Prediction.objects.get(email=data.get('email'))
+        # Evitar 500 si hay duplicados históricos del mismo email: tomar el último actualizado
+        inst = (
+            Prediction.objects.filter(email=data.get('email'))
+            .order_by('-updated_at')
+            .first()
+        )
+        if inst is not None:
             serializer = PredictionSerializer(inst, data=data, partial=True)
-        except Prediction.DoesNotExist:
+        else:
             serializer = PredictionSerializer(data=data)
 
         if serializer.is_valid():
@@ -169,6 +180,9 @@ class OfficialResultsView(APIView):
     """
 
     def get(self, request: Request):
+        """Devuelve 200 siempre; si no hay resultados publicados, responde
+        un payload vacío para evitar errores en consola del browser.
+        """
         try:
             obj = (
                 OfficialResults.objects.filter(is_published=True)
@@ -176,12 +190,28 @@ class OfficialResultsView(APIView):
                 .first()
             )
             if not obj:
-                return JsonResponse({'detail': MSG_WAIT_RESULTS}, status=404)
+                return JsonResponse({
+                    'national_percentages': {},
+                    'participation': None,
+                    'margin_1_2': None,
+                    'blanco_nulo_impugnado': None,
+                    'total_votes': None,
+                    'provinciales': {},
+                    'detail': MSG_WAIT_RESULTS,
+                })
             return JsonResponse(OfficialResultsSerializer(obj).data)
         except Exception as e:
             # En producción preferimos respuesta controlada sin stacktrace
             print(f"OfficialResultsView get failed: {type(e).__name__}: {e}")
-            return JsonResponse({'detail': MSG_WAIT_RESULTS}, status=404)
+            return JsonResponse({
+                'national_percentages': {},
+                'participation': None,
+                'margin_1_2': None,
+                'blanco_nulo_impugnado': None,
+                'total_votes': None,
+                'provinciales': {},
+                'detail': MSG_WAIT_RESULTS,
+            })
 
     def post(self, request: Request):
         # Requiere sesión de staff
@@ -211,14 +241,24 @@ class RankingView(APIView):
     """
 
     def get(self, request: Request):
+        """Devuelve 200 siempre. Si no hay resultados publicados, responde una
+        estructura vacía para evitar errores visibles en consola del browser.
+        """
         try:
             res = (
                 OfficialResults.objects.filter(is_published=True)
                 .order_by('-published_at', '-created_at')
                 .first()
             )
+
+            # Si no hay resultados, respondemos 200 con lista vacía
             if not res:
-                return JsonResponse({'detail': MSG_WAIT_RESULTS}, status=404)
+                return JsonResponse({
+                    'count': 0,
+                    'generated_at': timezone.now().isoformat(),
+                    'results': [],
+                    'detail': MSG_WAIT_RESULTS,
+                })
 
             q = (request.GET.get('q') or '').strip()
             qs = Prediction.objects.all().only('username','email','top3','national_percentages','participation','margin_1_2','updated_at')
@@ -253,8 +293,14 @@ class RankingView(APIView):
                 'results': items,
             })
         except Exception as e:
+            # Fallback seguro: 200 con lista vacía
             print(f"RankingView failed: {type(e).__name__}: {e}")
-            return JsonResponse({'detail': MSG_WAIT_RESULTS}, status=404)
+            return JsonResponse({
+                'count': 0,
+                'generated_at': timezone.now().isoformat(),
+                'results': [],
+                'detail': MSG_WAIT_RESULTS,
+            })
 
 
 def _score_prediction(p: Prediction, res: OfficialResults) -> Dict[str, Any]:
