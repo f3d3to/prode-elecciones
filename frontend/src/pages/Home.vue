@@ -69,7 +69,7 @@ if (sim === '1') {
   }
 }
 
-const deadline = initialDeadline
+let deadline = initialDeadline
 const countdown = ref('')
 let timer: number | undefined
 const apiOk = ref(false)
@@ -135,6 +135,17 @@ onMounted(() => {
   }).catch(() => {
     playersError.value = 'error'
   })
+  // Si el backend publica un deadline en metadata, usarlo como autoridad (evita desfasajes de env del front)
+  axios.get(`${base}/api/metadata`).then((res) => {
+    const d = res.data?.deadline
+    if (d) {
+      const dt = new Date(String(d))
+      if (!Number.isNaN(dt.getTime())) {
+        deadline = dt
+        update()
+      }
+    }
+  }).catch(() => {})
 })
 
 onBeforeUnmount(() => {

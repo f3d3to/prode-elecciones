@@ -126,6 +126,20 @@ function updateDeadline() {
 onMounted(() => {
   updateDeadline()
   deadlineTimer = globalThis.setInterval(updateDeadline, 1000)
+  // Si el backend publica un deadline en /api/metadata, usarlo como fuente de verdad
+  try {
+    const base = String(import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '')
+    fetch(`${base}/api/metadata`).then(r => r.json()).then((data) => {
+      const d = data?.deadline
+      if (d) {
+        const dt = new Date(String(d))
+        if (!Number.isNaN(dt.getTime())) {
+          deadlineDt = dt
+          updateDeadline()
+        }
+      }
+    }).catch(() => {})
+  } catch {}
 })
 onBeforeUnmount(() => {
   if (deadlineTimer) globalThis.clearInterval(deadlineTimer)
