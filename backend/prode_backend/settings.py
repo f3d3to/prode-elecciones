@@ -87,12 +87,29 @@ REST_FRAMEWORK = {
     'DEFAULT_RENDERER_CLASSES': ['rest_framework.renderers.JSONRenderer'],
 }
 
-# CORS
-if DEBUG:
-    CORS_ALLOW_ALL_ORIGINS = True
+# CORS: enumerar orígenes permitidos para que funcione con credenciales
+_origins_env = os.environ.get('ALLOWED_ORIGINS')
+if _origins_env:
+    CORS_ALLOWED_ORIGINS = [s for s in _origins_env.split(',') if s]
 else:
-    CORS_ALLOWED_ORIGINS = os.environ.get('ALLOWED_ORIGINS', '').split(',') if os.environ.get('ALLOWED_ORIGINS') else []
+    # Defaults para dev
+    CORS_ALLOWED_ORIGINS = [
+        'http://localhost:5173', 'http://127.0.0.1:5173',
+        'https://localhost:5173', 'https://127.0.0.1:5173',
+        "https://prode-2025-jade.vercel.app",
+    ]
+CORS_ALLOW_ALL_ORIGINS = False
 CORS_ALLOW_CREDENTIALS = True
+
+# CSRF trusted origins (cuando front y back están en dominios distintos)
+_csrf_env = os.environ.get('CSRF_TRUSTED_ORIGINS')
+if _csrf_env:
+    CSRF_TRUSTED_ORIGINS = [s for s in _csrf_env.split(',') if s]
+else:
+    CSRF_TRUSTED_ORIGINS = [
+        'http://localhost:5173', 'http://127.0.0.1:5173',
+        'https://localhost:5173', 'https://127.0.0.1:5173',
+    ]
 
 # Deadline
 DEADLINE = os.environ.get('DEADLINE')  # ISO-UTC string
@@ -106,3 +123,15 @@ def is_after_deadline() -> bool:
         return datetime.now(timezone.utc) >= dt
     except Exception:
         return False
+
+# Cookies cross-site para producción (Vercel -> Render):
+# Habilitar con CROSS_SITE_COOKIES=true en el entorno de producción (HTTPS requerido)
+_cross = os.environ.get('CROSS_SITE_COOKIES', 'false').strip().lower() in ('1','true','yes')
+if _cross:
+    SESSION_COOKIE_SAMESITE = 'None'
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SAMESITE = 'None'
+    CSRF_COOKIE_SECURE = True
+
+# Admin token TTL (segundos) para autenticación alternativa sin cookies
+ADMIN_TOKEN_TTL = int(os.environ.get('ADMIN_TOKEN_TTL', '86400'))  # 24h

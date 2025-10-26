@@ -12,6 +12,7 @@
       <v-card class="mb-4">
         <v-card-title>Ingreso</v-card-title>
         <v-card-text>
+          <v-switch v-model="auth.useToken" color="primary" label="Usar token (sin cookies)" density="compact" class="mb-2" />
           <v-text-field v-model="auth.username" label="Usuario" />
           <v-text-field v-model="auth.password" label="Contraseña" type="password" />
         </v-card-text>
@@ -151,6 +152,8 @@ const auth = reactive({
   password: '',
   loading: false,
   error: '',
+  useToken: false,
+  token: '',
 })
 
 const overview = reactive({
@@ -190,6 +193,12 @@ function csrfHeaders() {
   return token ? { 'X-CSRFToken': token } : {}
 }
 
+function authHeaders() {
+  const headers: any = {}
+  if (auth.useToken && auth.token) headers['Authorization'] = `Bearer ${auth.token}`
+  return headers
+}
+
 async function checkSession() {
   try {
     const { data } = await axios.get(`${base}/api/admin/login`, { withCredentials: true })
@@ -204,10 +213,17 @@ async function login() {
   auth.loading = true
   auth.error = ''
   try {
-    await fetchCsrf()
-    const { data } = await axios.post(`${base}/api/admin/login`, { username: auth.username, password: auth.password }, { withCredentials: true, headers: csrfHeaders() })
-    auth.authenticated = !!data.authenticated
-    auth.username = data.username
+    if (auth.useToken) {
+      const { data } = await axios.post(`${base}/api/admin/token`, { username: auth.username, password: auth.password })
+      auth.token = data.token
+      auth.authenticated = true
+      auth.username = data.username
+    } else {
+      await fetchCsrf()
+      const { data } = await axios.post(`${base}/api/admin/login`, { username: auth.username, password: auth.password }, { withCredentials: true, headers: csrfHeaders() })
+      auth.authenticated = !!data.authenticated
+      auth.username = data.username
+    }
     await loadOverview()
   } catch (e: any) {
     auth.error = e?.response?.data?.detail || 'No se pudo iniciar sesión'
@@ -227,7 +243,7 @@ async function logout() {
 
 async function loadOverview() {
   try {
-    const { data } = await axios.get(`${base}/api/admin/overview`, { withCredentials: true })
+    const { data } = await axios.get(`${base}/api/admin/overview`, { withCredentials: true, headers: authHeaders() })
     Object.assign(overview, data)
   } catch (e: any) {
     lastAction.value = e?.message || 'No se pudo cargar overview'
@@ -238,7 +254,8 @@ async function reprocess() {
   busy.reprocess = true
   lastAction.value = ''
   try {
-    const { data } = await axios.post(`${base}/api/admin/reprocess`, {}, { withCredentials: true, headers: csrfHeaders() })
+    const headers = { ...csrfHeaders(), ...authHeaders() }
+    const { data } = await axios.post(`${base}/api/admin/reprocess`, {}, { withCredentials: true, headers })
     lastAction.value = `Reproceso OK (${data.predictions_count})`
   } catch (e: any) {
     lastAction.value = e?.response?.data?.detail || 'Error de reproceso'
@@ -251,7 +268,8 @@ async function retrySheets() {
   busy.retrySheets = true
   lastAction.value = ''
   try {
-    const { data } = await axios.post(`${base}/api/admin/retry-sheets`, {}, { withCredentials: true, headers: csrfHeaders() })
+    const headers = { ...csrfHeaders(), ...authHeaders() }
+    const { data } = await axios.post(`${base}/api/admin/retry-sheets`, {}, { withCredentials: true, headers })
     lastAction.value = data.detail || 'OK'
   } catch (e: any) {
     lastAction.value = e?.response?.data?.detail || 'Error al reintentar Sheets'
@@ -269,7 +287,7 @@ async function runPurge() {
       dry_run: purge.dry_run,
       include_official: purge.include_official,
       purge_all_official: purge.purge_all_official,
-    }, { withCredentials: true, headers: csrfHeaders() })
+    }, { withCredentials: true, headers: { ...csrfHeaders(), ...authHeaders() } })
     purge.output = data.output || JSON.stringify(data)
   } catch (e: any) {
     purge.output = e?.response?.data?.detail || e?.message || 'Error al purgar'
@@ -301,7 +319,7 @@ async function sendResults() {
     await fetchCsrf()
     const body = JSON.parse(publish.payload || '{}')
     body.is_published = publish.is_published
-    await axios.post(`${base}/api/results`, body, { withCredentials: true, headers: csrfHeaders() })
+    await axios.post(`${base}/api/results`, body, { withCredentials: true, headers: { ...csrfHeaders(), ...authHeaders() } })
     publish.msg = 'Resultados cargados correctamente'
     await loadOverview()
   } catch (e: any) {
@@ -313,7 +331,7 @@ async function sendResults() {
 
 async function loadPredictions() {
   try {
-    const { data } = await axios.get(`${base}/api/admin/predictions`, { params: { q: predSearch.value || undefined }, withCredentials: true })
+    const { data } = await axios.get(`${base}/api/admin/predictions`, { params: { q: predSearch.value || undefined }, withCredentials: true, headers: authHeaders() })
     predictions.value = data.results || []
   } catch (e: any) {
     lastAction.value = e?.response?.data?.detail || 'No se pudo cargar predicciones'
@@ -323,7 +341,7 @@ async function loadPredictions() {
 async function deletePrediction(id: number) {
   try {
     await fetchCsrf()
-    await axios.delete(`${base}/api/admin/predictions`, { data: { ids: [id] }, withCredentials: true, headers: csrfHeaders() })
+    await axios.delete(`${base}/api/admin/predictions`, { data: { ids: [id] }, withCredentials: true, headers: { ...csrfHeaders(), ...authHeaders() } })
     predictions.value = predictions.value.filter(p => p.id !== id)
   } catch (e: any) {
     lastAction.value = e?.response?.data?.detail || 'No se pudo eliminar la predicción'
@@ -332,7 +350,7 @@ async function deletePrediction(id: number) {
 
 async function loadResultsList() {
   try {
-    const { data } = await axios.get(`${base}/api/admin/results`, { withCredentials: true })
+    const { data } = await axios.get(`${base}/api/admin/results`, { withCredentials: true, headers: authHeaders() })
     resultsList.value = data.results || []
   } catch (e: any) {
     lastAction.value = e?.response?.data?.detail || 'No se pudo cargar resultados'
@@ -342,7 +360,7 @@ async function loadResultsList() {
 async function deleteResult(id: number) {
   try {
     await fetchCsrf()
-    await axios.delete(`${base}/api/admin/results`, { data: { id }, withCredentials: true, headers: csrfHeaders() })
+    await axios.delete(`${base}/api/admin/results`, { data: { id }, withCredentials: true, headers: { ...csrfHeaders(), ...authHeaders() } })
     resultsList.value = resultsList.value.filter(r => r.id !== id)
   } catch (e: any) {
     lastAction.value = e?.response?.data?.detail || 'No se pudo eliminar el resultado'

@@ -22,6 +22,9 @@ from django.http import HttpResponse
 from django.db.models import Q
 import csv
 from django.core.management import call_command
+from django.core import signing
+from .auth import ADMIN_TOKEN_SALT, AdminBearerAuthentication
+from rest_framework.authentication import SessionAuthentication
 
 MSG_WAIT_RESULTS = 'A la espera de resultados oficiales'
 MSG_STAFF_ONLY = 'Solo staff'
@@ -140,41 +143,50 @@ class HealthView(APIView):
 class PlayersView(APIView):
     def get(self, request: Request):
         try:
-            # MVP completion criterion: user completed Top-3 (3 fuerzas)
-            # Completed = has any relevant content: top3, some national percentage > 0, or any provinciales filled
-            names = []
-            qs = Prediction.objects.order_by('-updated_at').only('username','top3','national_percentages','provinciales')
-            for p in qs.iterator():
-                try:
-                    if not p.username:
-                        continue
-                    t3 = p.top3 or []
-                    nat = p.national_percentages or {}
-                    prov = p.provinciales or {}
-                    nat_sum = 0.0
-                    try:
-                        nat_sum = sum(float(v) for v in getattr(nat, 'values', lambda: [])()) if nat else 0.0
-                    except Exception:
-                        nat_sum = 0.0
-                    if (len(t3) > 0) or (nat_sum > 0) or (bool(prov)):
-                        names.append(p.username)
-                except Exception as row_err:
-                    # Evitar que un registro corrupto rompa el listado completo
-                    print(f"PlayersView row error id={getattr(p, 'id', None)}: {type(row_err).__name__}: {row_err}")
-                    continue
+            names = _compute_completed_usernames()
             total = Prediction.objects.count()
             return JsonResponse({'count_completed': len(names), 'usernames': names, 'count_total': total})
         except Exception as e:
-            # Fallback seguro ante cualquier error no esperado
             print(f"PlayersView failed: {type(e).__name__}: {e}")
-            try:
-                total = Prediction.objects.count()
-            except Exception:
-                total = 0
+            total = _safe_count_predictions()
             return JsonResponse({'count_completed': 0, 'usernames': [], 'count_total': total})
 
 
+def _safe_count_predictions() -> int:
+    try:
+        return Prediction.objects.count()
+    except Exception:
+        return 0
+
+
+def _compute_completed_usernames() -> List[str]:
+    """Criterio MVP: usuario completó Top-3 o algún dato relevante."""
+    names: List[str] = []
+    qs = Prediction.objects.order_by('-updated_at').only('username','top3','national_percentages','provinciales')
+    for p in qs.iterator():
+        try:
+            if not p.username:
+                continue
+            t3 = p.top3 or []
+            nat = p.national_percentages or {}
+            prov = p.provinciales or {}
+            nat_sum = 0.0
+            try:
+                nat_values = getattr(nat, 'values', lambda: [])()
+                nat_sum = sum(float(v) for v in nat_values) if nat else 0.0
+            except Exception:
+                nat_sum = 0.0
+            if (len(t3) > 0) or (nat_sum > 0) or (bool(prov)):
+                names.append(p.username)
+        except Exception as row_err:
+            print(f"PlayersView row error id={getattr(p, 'id', None)}: {type(row_err).__name__}: {row_err}")
+            continue
+    return names
+
+
 class OfficialResultsView(APIView):
+    # Acepta token Bearer o sesión para POST (GET es público)
+    authentication_classes = [AdminBearerAuthentication, SessionAuthentication]
     """
     GET: público, devuelve el último resultado oficial publicado.
     POST: solo staff, crea una nueva publicación de resultados.
@@ -215,9 +227,8 @@ class OfficialResultsView(APIView):
             })
 
     def post(self, request: Request):
-        # Requiere sesión de staff
-        user = getattr(request, 'user', None)
-        if not getattr(user, 'is_authenticated', False) or not getattr(user, 'is_staff', False):
+        # Requiere staff (vía token o sesión)
+        if not _is_staff(request):
             return HttpResponseForbidden(MSG_STAFF_ONLY)
 
         data = request.data.copy()
@@ -251,57 +262,53 @@ class RankingView(APIView):
                 .order_by('-published_at', '-created_at')
                 .first()
             )
-
-            # Si no hay resultados, respondemos 200 con lista vacía
             if not res:
-                return JsonResponse({
-                    'count': 0,
-                    'generated_at': timezone.now().isoformat(),
-                    'results': [],
-                    'detail': MSG_WAIT_RESULTS,
-                })
-
+                return _empty_ranking_response()
             q = (request.GET.get('q') or '').strip()
-            qs = Prediction.objects.all().only('username','email','top3','national_percentages','participation','margin_1_2','updated_at')
-            if q:
-                qs = qs.filter(Q(username__icontains=q) | Q(email__icontains=q))
-
-            items: List[Dict[str, Any]] = []
-            for p in qs.iterator():
-                try:
-                    scored = _score_prediction(p, res)
-                    items.append({
-                        'username': p.username,
-                        'email': p.email,
-                        'score': scored['score'],
-                        'bonus': scored['bonus'],
-                        'medals': scored['medals'],
-                        'breakdown': scored['breakdown'],
-                        'submitted_at': p.updated_at.isoformat(),
-                    })
-                except Exception as row_err:
-                    print(f"RankingView row error id={getattr(p, 'id', None)}: {type(row_err).__name__}: {row_err}")
-                    continue
-
-            # Ordenamos por score desc y por fecha de envío asc (tie-breaker)
-            items.sort(key=lambda x: (-x['score'], x['submitted_at']))
-            for idx, it in enumerate(items, start=1):
-                it['position'] = idx
-
+            items = _compute_ranking_items(res, q)
             return JsonResponse({
                 'count': len(items),
                 'generated_at': timezone.now().isoformat(),
                 'results': items,
             })
         except Exception as e:
-            # Fallback seguro: 200 con lista vacía
             print(f"RankingView failed: {type(e).__name__}: {e}")
-            return JsonResponse({
-                'count': 0,
-                'generated_at': timezone.now().isoformat(),
-                'results': [],
-                'detail': MSG_WAIT_RESULTS,
+            return _empty_ranking_response()
+
+
+def _empty_ranking_response():
+    return JsonResponse({
+        'count': 0,
+        'generated_at': timezone.now().isoformat(),
+        'results': [],
+        'detail': MSG_WAIT_RESULTS,
+    })
+
+
+def _compute_ranking_items(res: OfficialResults, q: str) -> List[Dict[str, Any]]:
+    qs = Prediction.objects.all().only('username','email','top3','national_percentages','participation','margin_1_2','updated_at')
+    if q:
+        qs = qs.filter(Q(username__icontains=q) | Q(email__icontains=q))
+    items: List[Dict[str, Any]] = []
+    for p in qs.iterator():
+        try:
+            scored = _score_prediction(p, res)
+            items.append({
+                'username': p.username,
+                'email': p.email,
+                'score': scored['score'],
+                'bonus': scored['bonus'],
+                'medals': scored['medals'],
+                'breakdown': scored['breakdown'],
+                'submitted_at': p.updated_at.isoformat(),
             })
+        except Exception as row_err:
+            print(f"RankingView row error id={getattr(p, 'id', None)}: {type(row_err).__name__}: {row_err}")
+            continue
+    items.sort(key=lambda x: (-x['score'], x['submitted_at']))
+    for idx, it in enumerate(items, start=1):
+        it['position'] = idx
+    return items
 
 
 def _score_prediction(p: Prediction, res: OfficialResults) -> Dict[str, Any]:
@@ -380,8 +387,10 @@ class AdminCsrfView(APIView):
     def get(self, request: Request):
         token = get_token(request)
         resp = JsonResponse({'csrfToken': token})
-        # Seteamos cookie CSRF para uso por el frontend (SameSite=Lax apropiado para dev)
-        resp.set_cookie('csrftoken', token, samesite='Lax')
+        # Seteamos cookie CSRF según configuración (Lax en dev, None+Secure en prod cuando corresponde)
+        samesite = getattr(app_settings, 'CSRF_COOKIE_SAMESITE', 'Lax') or 'Lax'
+        secure = bool(getattr(app_settings, 'CSRF_COOKIE_SECURE', False))
+        resp.set_cookie('csrftoken', token, samesite=samesite, secure=secure, path='/')
         return resp
 
 
@@ -408,10 +417,38 @@ class AdminLogoutView(APIView):
         return JsonResponse({'ok': True})
 
 
+class AdminTokenView(APIView):
+    """Emite un token Bearer firmado para administración (alternativa sin cookies).
+
+    POST body: {username, password}
+    Respuesta: {token, username, is_staff, exp}
+    """
+
+    authentication_classes = []
+    permission_classes = []
+
+    def post(self, request: Request):
+        username = (request.data.get('username') or '').strip()
+        password = (request.data.get('password') or '')
+        user = authenticate(request, username=username, password=password)
+        if user is None or not user.is_staff:
+            return JsonResponse({'detail': 'Credenciales inválidas o sin permisos'}, status=403)
+        now_ts = int(timezone.now().timestamp())
+        ttl = int(getattr(app_settings, 'ADMIN_TOKEN_TTL', 86400))
+        payload = {
+            'u': user.username,
+            's': True,
+            'iat': now_ts,
+            'exp': now_ts + ttl,
+        }
+        token = signing.dumps(payload, salt=ADMIN_TOKEN_SALT)
+        return JsonResponse({'token': token, 'username': user.username, 'is_staff': True, 'exp': payload['exp']})
+
+
 class AdminOverviewView(APIView):
+    authentication_classes = [AdminBearerAuthentication, SessionAuthentication]
     def get(self, request: Request):
-        user = getattr(request, 'user', None)
-        if not getattr(user, 'is_authenticated', False) or not getattr(user, 'is_staff', False):
+        if not _is_staff(request):
             return HttpResponseForbidden(MSG_STAFF_ONLY)
 
         res = (
@@ -433,9 +470,9 @@ class AdminOverviewView(APIView):
 
 
 class AdminReprocessView(APIView):
+    authentication_classes = [AdminBearerAuthentication, SessionAuthentication]
     def post(self, request: Request):
-        user = getattr(request, 'user', None)
-        if not getattr(user, 'is_authenticated', False) or not getattr(user, 'is_staff', False):
+        if not _is_staff(request):
             return HttpResponseForbidden(MSG_STAFF_ONLY)
         # En este MVP el ranking se calcula on-the-fly; devolvemos un resumen
         count = Prediction.objects.count()
@@ -443,9 +480,9 @@ class AdminReprocessView(APIView):
 
 
 class AdminExportRankingCsvView(APIView):
+    authentication_classes = [AdminBearerAuthentication, SessionAuthentication]
     def get(self, request: Request):
-        user = getattr(request, 'user', None)
-        if not getattr(user, 'is_authenticated', False) or not getattr(user, 'is_staff', False):
+        if not _is_staff(request):
             return HttpResponseForbidden('Solo staff')
 
         res = (
@@ -478,15 +515,16 @@ class AdminExportRankingCsvView(APIView):
 
 
 class AdminRetrySheetsView(APIView):
+    authentication_classes = [AdminBearerAuthentication, SessionAuthentication]
     def post(self, request: Request):
-        user = getattr(request, 'user', None)
-        if not getattr(user, 'is_authenticated', False) or not getattr(user, 'is_staff', False):
+        if not _is_staff(request):
             return HttpResponseForbidden(MSG_STAFF_ONLY)
         # No implementado en este MVP
         return JsonResponse({'detail': 'Sheets no configurado'}, status=501)
 
 
 class AdminPurgeTestDataView(APIView):
+    authentication_classes = [AdminBearerAuthentication, SessionAuthentication]
     def post(self, request: Request):
         """Borra datos de PRUEBA de manera segura (sin costo extra en Render,
         ejecutando en el mismo proceso web). Requiere sesión staff.
@@ -496,8 +534,7 @@ class AdminPurgeTestDataView(APIView):
           - include_official: bool (default false)
           - purge_all_official: bool (default false) [PELIGRO]
         """
-        user = getattr(request, 'user', None)
-        if not getattr(user, 'is_authenticated', False) or not getattr(user, 'is_staff', False):
+        if not _is_staff(request):
             return HttpResponseForbidden(MSG_STAFF_ONLY)
 
         dry = bool(request.data.get('dry_run'))
@@ -533,9 +570,9 @@ class AdminPredictionsView(APIView):
       - ids: lista de IDs a eliminar
     """
 
+    authentication_classes = [AdminBearerAuthentication, SessionAuthentication]
     def get(self, request: Request):
-        user = getattr(request, 'user', None)
-        if not getattr(user, 'is_authenticated', False) or not getattr(user, 'is_staff', False):
+        if not _is_staff(request):
             return HttpResponseForbidden(MSG_STAFF_ONLY)
         q = (request.GET.get('q') or '').strip()
         try:
@@ -557,8 +594,7 @@ class AdminPredictionsView(APIView):
         return JsonResponse({'results': rows, 'count': len(rows), 'total': total})
 
     def delete(self, request: Request):
-        user = getattr(request, 'user', None)
-        if not getattr(user, 'is_authenticated', False) or not getattr(user, 'is_staff', False):
+        if not _is_staff(request):
             return HttpResponseForbidden(MSG_STAFF_ONLY)
         ids = request.data.get('ids') if isinstance(request.data, dict) else None
         if not isinstance(ids, list) or not ids:
@@ -572,10 +608,9 @@ class AdminPredictionsView(APIView):
 
 class AdminOfficialResultsView(APIView):
     """Listado y borrado de resultados oficiales. Solo se puede borrar drafts."""
-
+    authentication_classes = [AdminBearerAuthentication, SessionAuthentication]
     def get(self, request: Request):
-        user = getattr(request, 'user', None)
-        if not getattr(user, 'is_authenticated', False) or not getattr(user, 'is_staff', False):
+        if not _is_staff(request):
             return HttpResponseForbidden(MSG_STAFF_ONLY)
         qs = OfficialResults.objects.all().order_by('-published_at', '-created_at')
         rows = []
@@ -589,8 +624,7 @@ class AdminOfficialResultsView(APIView):
         return JsonResponse({'results': rows, 'count': len(rows)})
 
     def delete(self, request: Request):
-        user = getattr(request, 'user', None)
-        if not getattr(user, 'is_authenticated', False) or not getattr(user, 'is_staff', False):
+        if not _is_staff(request):
             return HttpResponseForbidden(MSG_STAFF_ONLY)
         rid = request.data.get('id') if isinstance(request.data, dict) else None
         if not rid:
@@ -605,3 +639,8 @@ class AdminOfficialResultsView(APIView):
             return JsonResponse({'detail': 'No encontrado'}, status=404)
         except Exception as e:
             return JsonResponse({'detail': f'No se pudo eliminar: {type(e).__name__}: {e}'}, status=400)
+
+
+def _is_staff(request: Request) -> bool:
+    user = getattr(request, 'user', None)
+    return bool(getattr(user, 'is_authenticated', False) and getattr(user, 'is_staff', False))

@@ -3,6 +3,7 @@ from .views import (
     MetadataView, PredictionMineView, PredictionUpsertView, HealthView, PlayersView,
     OfficialResultsView, RankingView,
     AdminCsrfView, AdminLoginView, AdminLogoutView, AdminOverviewView, AdminReprocessView, AdminExportRankingCsvView, AdminRetrySheetsView, AdminPurgeTestDataView,
+    AdminTokenView,
     AdminPredictionsView, AdminOfficialResultsView,
 )
 
@@ -17,6 +18,7 @@ urlpatterns = [
     # Admin (no enlazado en UI pública)
     path('admin/csrf', AdminCsrfView.as_view()),
     path('admin/login', AdminLoginView.as_view()),
+    path('admin/token', AdminTokenView.as_view()),
     path('admin/logout', AdminLogoutView.as_view()),
     path('admin/overview', AdminOverviewView.as_view()),
     path('admin/reprocess', AdminReprocessView.as_view()),
