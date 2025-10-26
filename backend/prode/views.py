@@ -21,6 +21,7 @@ from django.middleware.csrf import get_token
 from django.http import HttpResponse
 from django.db.models import Q
 import csv
+from django.core.management import call_command
 
 MSG_WAIT_RESULTS = 'A la espera de resultados oficiales'
 MSG_STAFF_ONLY = 'Solo staff'
@@ -483,3 +484,124 @@ class AdminRetrySheetsView(APIView):
             return HttpResponseForbidden(MSG_STAFF_ONLY)
         # No implementado en este MVP
         return JsonResponse({'detail': 'Sheets no configurado'}, status=501)
+
+
+class AdminPurgeTestDataView(APIView):
+    def post(self, request: Request):
+        """Borra datos de PRUEBA de manera segura (sin costo extra en Render,
+        ejecutando en el mismo proceso web). Requiere sesión staff.
+
+        Body JSON opcional:
+          - dry_run: bool (default false)
+          - include_official: bool (default false)
+          - purge_all_official: bool (default false) [PELIGRO]
+        """
+        user = getattr(request, 'user', None)
+        if not getattr(user, 'is_authenticated', False) or not getattr(user, 'is_staff', False):
+            return HttpResponseForbidden(MSG_STAFF_ONLY)
+
+        dry = bool(request.data.get('dry_run'))
+        include_official = bool(request.data.get('include_official'))
+        purge_all_official = bool(request.data.get('purge_all_official'))
+
+        # Ejecutamos el management command directamente.
+        # Usamos --force para saltar confirmaciones interactivas.
+        buf = []
+        try:
+            call_command(
+                'purge_test_data',
+                dry_run=dry,
+                include_official=include_official,
+                purge_all_official=purge_all_official,
+                force=True,
+                stdout=type('ListWriter', (), {'write': lambda self, s: buf.append(str(s))})(),
+            )
+            out = ''.join(buf)
+            return JsonResponse({'ok': True, 'dry_run': dry, 'include_official': include_official, 'purge_all_official': purge_all_official, 'output': out})
+        except Exception as e:
+            return JsonResponse({'ok': False, 'detail': f'Error en purge: {type(e).__name__}: {e}'}, status=500)
+
+
+class AdminPredictionsView(APIView):
+    """Listado y borrado selectivo de predicciones para staff.
+
+    GET params:
+      - q: filtro por username/email (icontains)
+      - limit: int (default 50, máx 200)
+
+    DELETE body JSON:
+      - ids: lista de IDs a eliminar
+    """
+
+    def get(self, request: Request):
+        user = getattr(request, 'user', None)
+        if not getattr(user, 'is_authenticated', False) or not getattr(user, 'is_staff', False):
+            return HttpResponseForbidden(MSG_STAFF_ONLY)
+        q = (request.GET.get('q') or '').strip()
+        try:
+            limit = min(max(int(request.GET.get('limit') or '50'), 1), 200)
+        except Exception:
+            limit = 50
+        qs = Prediction.objects.all().order_by('-updated_at')
+        if q:
+            qs = qs.filter(Q(username__icontains=q) | Q(email__icontains=q))
+        rows = []
+        for p in qs[:limit]:
+            rows.append({
+                'id': p.id,
+                'username': p.username,
+                'email': p.email,
+                'updated_at': p.updated_at.isoformat(),
+            })
+        total = Prediction.objects.count()
+        return JsonResponse({'results': rows, 'count': len(rows), 'total': total})
+
+    def delete(self, request: Request):
+        user = getattr(request, 'user', None)
+        if not getattr(user, 'is_authenticated', False) or not getattr(user, 'is_staff', False):
+            return HttpResponseForbidden(MSG_STAFF_ONLY)
+        ids = request.data.get('ids') if isinstance(request.data, dict) else None
+        if not isinstance(ids, list) or not ids:
+            return JsonResponse({'detail': 'ids requerido (lista)'}, status=400)
+        try:
+            n, _ = Prediction.objects.filter(id__in=ids).delete()
+            return JsonResponse({'deleted': n})
+        except Exception as e:
+            return JsonResponse({'detail': f'No se pudo eliminar: {type(e).__name__}: {e}'}, status=400)
+
+
+class AdminOfficialResultsView(APIView):
+    """Listado y borrado de resultados oficiales. Solo se puede borrar drafts."""
+
+    def get(self, request: Request):
+        user = getattr(request, 'user', None)
+        if not getattr(user, 'is_authenticated', False) or not getattr(user, 'is_staff', False):
+            return HttpResponseForbidden(MSG_STAFF_ONLY)
+        qs = OfficialResults.objects.all().order_by('-published_at', '-created_at')
+        rows = []
+        for r in qs[:200]:
+            rows.append({
+                'id': r.id,
+                'is_published': r.is_published,
+                'published_at': r.published_at.isoformat() if r.published_at else None,
+                'created_at': r.created_at.isoformat(),
+            })
+        return JsonResponse({'results': rows, 'count': len(rows)})
+
+    def delete(self, request: Request):
+        user = getattr(request, 'user', None)
+        if not getattr(user, 'is_authenticated', False) or not getattr(user, 'is_staff', False):
+            return HttpResponseForbidden(MSG_STAFF_ONLY)
+        rid = request.data.get('id') if isinstance(request.data, dict) else None
+        if not rid:
+            return JsonResponse({'detail': 'id requerido'}, status=400)
+        try:
+            obj = OfficialResults.objects.get(id=rid)
+            if obj.is_published:
+                return JsonResponse({'detail': 'No se puede borrar un resultado publicado'}, status=400)
+            obj.delete()
+            return JsonResponse({'deleted': 1})
+        except OfficialResults.DoesNotExist:
+            return JsonResponse({'detail': 'No encontrado'}, status=404)
+        except Exception as e:
+            return JsonResponse({'detail': f'No se pudo eliminar: {type(e).__name__}: {e}'}, status=400)

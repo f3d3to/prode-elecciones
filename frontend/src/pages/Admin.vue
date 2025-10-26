@@ -53,6 +53,74 @@
         </v-card-text>
       </v-card>
 
+      <v-card class="mb-4">
+        <v-card-title>Limpiar datos de prueba</v-card-title>
+        <v-card-text>
+          <v-alert type="info" variant="tonal" class="mb-2">Ejecuta el purge en el mismo servicio (gratis). No borra datos reales salvo que marques la opción peligrosa.</v-alert>
+          <v-switch v-model="purge.dry_run" label="Dry-run (simular)" color="primary" />
+          <v-switch v-model="purge.include_official" label="Incluir resultados oficiales NO publicados" color="warning" />
+          <v-switch v-model="purge.purge_all_official" label="[PELIGRO] Eliminar TODOS los resultados oficiales" color="error" />
+          <div class="d-flex gap-2 mt-2">
+            <v-btn color="error" :loading="busy.purge" @click="runPurge">Ejecutar purge</v-btn>
+          </div>
+          <v-textarea v-model="purge.output" class="mt-2" auto-grow rows="6" label="Salida" readonly />
+        </v-card-text>
+      </v-card>
+
+      <v-card class="mb-4">
+        <v-card-title>Gestionar predicciones</v-card-title>
+        <v-card-text>
+          <div class="d-flex gap-2 mb-2" style="max-width:600px;">
+            <v-text-field v-model="predSearch" label="Buscar por nombre o email" density="comfortable" clearable @click:clear="() => { predSearch = ''; loadPredictions() }" @keyup.enter="loadPredictions" />
+            <v-btn color="primary" @click="loadPredictions">Buscar</v-btn>
+          </div>
+          <v-table density="comfortable" v-if="predictions.length">
+            <thead>
+              <tr>
+                <th scope="col">ID</th><th scope="col">Usuario</th><th scope="col">Email</th><th scope="col">Actualizado</th><th scope="col"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="p in predictions" :key="p.id">
+                <td>{{ p.id }}</td>
+                <td>{{ p.username }}</td>
+                <td class="text-medium-emphasis">{{ p.email }}</td>
+                <td class="text-medium-emphasis">{{ new Date(p.updated_at).toLocaleString('es-AR') }}</td>
+                <td>
+                  <v-btn size="x-small" color="error" variant="tonal" @click="deletePrediction(p.id)">Eliminar</v-btn>
+                </td>
+              </tr>
+            </tbody>
+          </v-table>
+          <v-alert v-else type="info" variant="tonal">Sin resultados para mostrar</v-alert>
+        </v-card-text>
+      </v-card>
+
+      <v-card class="mb-6">
+        <v-card-title>Resultados oficiales</v-card-title>
+        <v-card-text>
+          <v-table density="comfortable" v-if="resultsList.length">
+            <thead>
+              <tr>
+                <th scope="col">ID</th><th scope="col">Publicado</th><th scope="col">Publicado en</th><th scope="col">Creado</th><th scope="col"></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="r in resultsList" :key="r.id">
+                <td>{{ r.id }}</td>
+                <td>{{ r.is_published ? 'Sí' : 'No' }}</td>
+                <td class="text-medium-emphasis">{{ r.published_at ? new Date(r.published_at).toLocaleString('es-AR') : '—' }}</td>
+                <td class="text-medium-emphasis">{{ new Date(r.created_at).toLocaleString('es-AR') }}</td>
+                <td>
+                  <v-btn v-if="!r.is_published" size="x-small" color="error" variant="tonal" @click="deleteResult(r.id)">Eliminar draft</v-btn>
+                </td>
+              </tr>
+            </tbody>
+          </v-table>
+          <v-alert v-else type="info" variant="tonal">Sin resultados cargados</v-alert>
+        </v-card-text>
+      </v-card>
+
       <v-card>
         <v-card-title>Publicar resultados oficiales</v-card-title>
         <v-card-text>
@@ -93,12 +161,16 @@ const overview = reactive({
   results_published: false,
 })
 
-const busy = reactive({ reprocess: false, retrySheets: false })
+const busy = reactive({ reprocess: false, retrySheets: false, purge: false })
 const lastAction = ref('')
 
 const csvHref = `${base}/api/admin/export/ranking.csv`
 
 const publish = reactive({ is_published: true, payload: '', loading: false, msg: '' })
+const purge = reactive({ dry_run: true, include_official: false, purge_all_official: false, output: '' })
+const predSearch = ref('')
+const predictions = ref<Array<{id:number,username:string,email:string,updated_at:string}>>([])
+const resultsList = ref<Array<{id:number,is_published:boolean,published_at:string|null,created_at:string}>>([])
 
 async function fetchCsrf() {
   try {
@@ -188,6 +260,24 @@ async function retrySheets() {
   }
 }
 
+async function runPurge() {
+  busy.purge = true as any
+  purge.output = ''
+  try {
+    await fetchCsrf()
+    const { data } = await axios.post(`${base}/api/admin/purge`, {
+      dry_run: purge.dry_run,
+      include_official: purge.include_official,
+      purge_all_official: purge.purge_all_official,
+    }, { withCredentials: true, headers: csrfHeaders() })
+    purge.output = data.output || JSON.stringify(data)
+  } catch (e: any) {
+    purge.output = e?.response?.data?.detail || e?.message || 'Error al purgar'
+  } finally {
+    busy.purge = false as any
+  }
+}
+
 function loadExample() {
   const example = {
     is_published: true,
@@ -221,8 +311,50 @@ async function sendResults() {
   }
 }
 
+async function loadPredictions() {
+  try {
+    const { data } = await axios.get(`${base}/api/admin/predictions`, { params: { q: predSearch.value || undefined }, withCredentials: true })
+    predictions.value = data.results || []
+  } catch (e: any) {
+    lastAction.value = e?.response?.data?.detail || 'No se pudo cargar predicciones'
+  }
+}
+
+async function deletePrediction(id: number) {
+  try {
+    await fetchCsrf()
+    await axios.delete(`${base}/api/admin/predictions`, { data: { ids: [id] }, withCredentials: true, headers: csrfHeaders() })
+    predictions.value = predictions.value.filter(p => p.id !== id)
+  } catch (e: any) {
+    lastAction.value = e?.response?.data?.detail || 'No se pudo eliminar la predicción'
+  }
+}
+
+async function loadResultsList() {
+  try {
+    const { data } = await axios.get(`${base}/api/admin/results`, { withCredentials: true })
+    resultsList.value = data.results || []
+  } catch (e: any) {
+    lastAction.value = e?.response?.data?.detail || 'No se pudo cargar resultados'
+  }
+}
+
+async function deleteResult(id: number) {
+  try {
+    await fetchCsrf()
+    await axios.delete(`${base}/api/admin/results`, { data: { id }, withCredentials: true, headers: csrfHeaders() })
+    resultsList.value = resultsList.value.filter(r => r.id !== id)
+  } catch (e: any) {
+    lastAction.value = e?.response?.data?.detail || 'No se pudo eliminar el resultado'
+  }
+}
+
 onMounted(async () => {
   await checkSession()
-  if (auth.authenticated) await loadOverview()
+  if (auth.authenticated) {
+    await loadOverview()
+    await loadPredictions()
+    await loadResultsList()
+  }
 })
 </script>
