@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Optional, Set
+from typing import Optional, Set, Dict
 from prode_backend.settings import BASE_DIR
 
 _cache = {}
@@ -21,6 +21,24 @@ def get_fuerzas() -> Set[str]:
 def get_provincias() -> Set[str]:
     return set(_load_json('provincias'))
 
+def get_fuerzas_por_provincia() -> Dict[str, Set[str]]:
+    """Devuelve un mapa {provincia -> set(fuerzas permitidas)}.
+
+    Si el archivo no existe o está vacío, retorna {} y se usa el conjunto
+    global de fuerzas como fallback.
+    """
+    data = _load_json('fuerzas_por_provincia')
+    if not isinstance(data, dict):
+        return {}
+    out: Dict[str, Set[str]] = {}
+    for prov, arr in data.items():
+        try:
+            out[str(prov)] = set(arr or [])
+        except Exception:
+            # Ignoramos filas inválidas para no romper validación
+            continue
+    return out
+
 def validate_national_fuerzas(national: dict, fuerzas: Set[str]) -> Optional[str]:
     for k in national.keys():
         if k not in fuerzas:
@@ -31,12 +49,14 @@ def validate_provinciales(provinciales: dict, provincias: Set[str], fuerzas: Set
     for prov, payload in provinciales.items():
         if prov not in provincias:
             return f'Provincia "{prov}" inválida'
+        fuerzas_por_prov = get_fuerzas_por_provincia()
+        permitidas = fuerzas_por_prov.get(prov) or fuerzas
         porcentajes = payload.get('porcentajes') or payload.get('percentages') or {}
         for k in porcentajes.keys():
-            if k not in fuerzas:
+            if k not in permitidas:
                 return f'Fuerza "{k}" inválida en {prov}'
         winner = payload.get('winner') or payload.get('ganador')
-        if winner and winner not in fuerzas:
+        if winner and winner not in permitidas:
             return f'Ganador "{winner}" inválido en {prov}'
     return None
 

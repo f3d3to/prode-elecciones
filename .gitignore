@@ -14,3 +14,4 @@ frontend/dist/
 .vite/
 frontend/.vite/
 coverage/
+.vercel

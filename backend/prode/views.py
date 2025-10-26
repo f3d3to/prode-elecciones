@@ -8,6 +8,7 @@ from prode_backend import settings as app_settings
 from .validators import (
     get_fuerzas,
     get_provincias,
+    get_fuerzas_por_provincia,
     validate_national_fuerzas,
     validate_provinciales,
     validate_top3,
@@ -30,6 +31,7 @@ class MetadataView(APIView):
         return JsonResponse({
             'fuerzas': sorted(get_fuerzas()),
             'provincias': sorted(get_provincias()),
+            'fuerzas_por_provincia': get_fuerzas_por_provincia(),
             'deadline': app_settings.DEADLINE,
         })
 
