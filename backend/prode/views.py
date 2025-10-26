@@ -169,14 +169,19 @@ class OfficialResultsView(APIView):
     """
 
     def get(self, request: Request):
-        obj = (
-            OfficialResults.objects.filter(is_published=True)
-            .order_by('-published_at', '-created_at')
-            .first()
-        )
-        if not obj:
+        try:
+            obj = (
+                OfficialResults.objects.filter(is_published=True)
+                .order_by('-published_at', '-created_at')
+                .first()
+            )
+            if not obj:
+                return JsonResponse({'detail': MSG_WAIT_RESULTS}, status=404)
+            return JsonResponse(OfficialResultsSerializer(obj).data)
+        except Exception as e:
+            # En producción preferimos respuesta controlada sin stacktrace
+            print(f"OfficialResultsView get failed: {type(e).__name__}: {e}")
             return JsonResponse({'detail': MSG_WAIT_RESULTS}, status=404)
-        return JsonResponse(OfficialResultsSerializer(obj).data)
 
     def post(self, request: Request):
         # Requiere sesión de staff
@@ -206,42 +211,50 @@ class RankingView(APIView):
     """
 
     def get(self, request: Request):
-        res = (
-            OfficialResults.objects.filter(is_published=True)
-            .order_by('-published_at', '-created_at')
-            .first()
-        )
-        if not res:
-            return JsonResponse({'detail': MSG_WAIT_RESULTS}, status=404)
+        try:
+            res = (
+                OfficialResults.objects.filter(is_published=True)
+                .order_by('-published_at', '-created_at')
+                .first()
+            )
+            if not res:
+                return JsonResponse({'detail': MSG_WAIT_RESULTS}, status=404)
 
-        q = (request.GET.get('q') or '').strip()
-        qs = Prediction.objects.all().only('username','email','top3','national_percentages','participation','margin_1_2','updated_at')
-        if q:
-            qs = qs.filter(Q(username__icontains=q) | Q(email__icontains=q))
+            q = (request.GET.get('q') or '').strip()
+            qs = Prediction.objects.all().only('username','email','top3','national_percentages','participation','margin_1_2','updated_at')
+            if q:
+                qs = qs.filter(Q(username__icontains=q) | Q(email__icontains=q))
 
-        items: List[Dict[str, Any]] = []
-        for p in qs:
-            scored = _score_prediction(p, res)
-            items.append({
-                'username': p.username,
-                'email': p.email,
-                'score': scored['score'],
-                'bonus': scored['bonus'],
-                'medals': scored['medals'],
-                'breakdown': scored['breakdown'],
-                'submitted_at': p.updated_at.isoformat(),
+            items: List[Dict[str, Any]] = []
+            for p in qs.iterator():
+                try:
+                    scored = _score_prediction(p, res)
+                    items.append({
+                        'username': p.username,
+                        'email': p.email,
+                        'score': scored['score'],
+                        'bonus': scored['bonus'],
+                        'medals': scored['medals'],
+                        'breakdown': scored['breakdown'],
+                        'submitted_at': p.updated_at.isoformat(),
+                    })
+                except Exception as row_err:
+                    print(f"RankingView row error id={getattr(p, 'id', None)}: {type(row_err).__name__}: {row_err}")
+                    continue
+
+            # Ordenamos por score desc y por fecha de envío asc (tie-breaker)
+            items.sort(key=lambda x: (-x['score'], x['submitted_at']))
+            for idx, it in enumerate(items, start=1):
+                it['position'] = idx
+
+            return JsonResponse({
+                'count': len(items),
+                'generated_at': timezone.now().isoformat(),
+                'results': items,
             })
-
-        # Ordenamos por score desc y por fecha de envío asc (tie-breaker)
-        items.sort(key=lambda x: (-x['score'], x['submitted_at']))
-        for idx, it in enumerate(items, start=1):
-            it['position'] = idx
-
-        return JsonResponse({
-            'count': len(items),
-            'generated_at': timezone.now().isoformat(),
-            'results': items,
-        })
+        except Exception as e:
+            print(f"RankingView failed: {type(e).__name__}: {e}")
+            return JsonResponse({'detail': MSG_WAIT_RESULTS}, status=404)
 
 
 def _score_prediction(p: Prediction, res: OfficialResults) -> Dict[str, Any]:

@@ -213,6 +213,7 @@ import { onMounted, reactive, ref, computed, watch } from 'vue'
 import axios from 'axios'
 
 const fuerzas = ref<string[]>([])
+const fuerzasPorProvincia = ref<Record<string, string[]>>({})
 const provincias = ref<string[]>([])
 const loading = ref(false)
 const savedAt = ref('')
@@ -260,6 +261,7 @@ async function loadMetadata() {
   const { data } = await axios.get(`${base}/api/metadata`)
   fuerzas.value = data.fuerzas || []
   provincias.value = data.provincias || []
+  fuerzasPorProvincia.value = data.fuerzas_por_provincia || {}
   if (data.deadline) {
     const dl = new Date(data.deadline)
     afterDeadline.value = Date.now() >= dl.getTime()
@@ -271,8 +273,17 @@ async function loadMetadata() {
   // init provinciales structure
   for (const prov of provincias.value) {
     if (!form.provinciales[prov]) form.provinciales[prov] = { porcentajes: {} }
-    for (const f of fuerzas.value) {
+    const allowed = fuerzasPorProvincia.value[prov] || fuerzas.value
+    // Eliminar claves no permitidas (si existieran)
+    for (const k of Object.keys(form.provinciales[prov].porcentajes)) {
+      if (!allowed.includes(k)) delete form.provinciales[prov].porcentajes[k]
+    }
+    for (const f of allowed) {
       if (!(f in form.provinciales[prov].porcentajes)) form.provinciales[prov].porcentajes[f] = 0
+    }
+    // Winner inválido -> limpiar
+    if (form.provinciales[prov].winner && !allowed.includes(form.provinciales[prov].winner!)) {
+      form.provinciales[prov].winner = undefined
     }
   }
 }
@@ -281,7 +292,7 @@ async function preload() {
   if (!form.email) return
   try {
   const base = String(import.meta.env.VITE_API_BASE || '').replace(/\/+$/, '')
-    const { data } = await axios.get(`${base}/api/predictions/mine`, { params: { email: form.email, soft: 1 } })
+  const { data } = await axios.get(`${base}/api/predictions/mine`, { params: { email: form.email, soft: 1 } })
     if (data?.exists && data?.prediction) {
       Object.assign(form, data.prediction)
       savedAt.value = new Date(data.prediction.updated_at).toLocaleTimeString()
@@ -294,8 +305,16 @@ async function preload() {
     // asegurar estructura provinciales completa
     for (const prov of provincias.value) {
       if (!form.provinciales[prov]) form.provinciales[prov] = { porcentajes: {} }
-      for (const f of fuerzas.value) {
+      const allowed = fuerzasPorProvincia.value[prov] || fuerzas.value
+      // Sanitizar según allowed
+      for (const k of Object.keys(form.provinciales[prov].porcentajes)) {
+        if (!allowed.includes(k)) delete form.provinciales[prov].porcentajes[k]
+      }
+      for (const f of allowed) {
         if (!(f in form.provinciales[prov].porcentajes)) form.provinciales[prov].porcentajes[f] = 0
+      }
+      if (form.provinciales[prov].winner && !allowed.includes(form.provinciales[prov].winner!)) {
+        form.provinciales[prov].winner = undefined
       }
     }
   } catch (err: any) {
