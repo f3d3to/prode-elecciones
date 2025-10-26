@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 from datetime import datetime, timezone
 from dotenv import load_dotenv
+import dj_database_url
 
 load_dotenv()
 
@@ -55,11 +56,20 @@ TEMPLATES = [
 WSGI_APPLICATION = 'prode_backend.wsgi.application'
 
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+    "default": {
+        "ENGINE": "django.db.backends.sqlite3",
+        "NAME": BASE_DIR / "db.sqlite3",
     }
 }
+
+# Si hay DATABASE_URL, usar Postgres (prod/Render)
+if os.getenv("DATABASE_URL"):
+    DATABASES["default"] = dj_database_url.config(
+        env="DATABASE_URL",
+        conn_max_age=60,            # pooling liviano
+        ssl_require=True            # Render usa SSL
+    )
+
 
 AUTH_PASSWORD_VALIDATORS = []
 
