@@ -4,6 +4,9 @@
       <v-avatar size="40" class="mr-3" color="secondary"><span style="font-size:22px;">🗳️</span></v-avatar>
       <h2 class="mb-0 text-primary">Pronóstico (MVP)</h2>
     </div>
+    <v-alert v-if="afterDeadline" type="error" variant="tonal" class="mb-3">
+      Cerraron los comicios — edición deshabilitada.
+    </v-alert>
 
     <!-- Identificación modal -->
     <v-dialog v-model="showIdDialog" persistent max-width="520">
@@ -27,11 +30,11 @@
       <v-stepper-header>
         <v-stepper-item :value="1" title="Identificación" :complete="identified" />
         <v-divider></v-divider>
-        <v-stepper-item :value="2" title="Nacional" :disabled="!identified" />
+  <v-stepper-item :value="2" title="Nacional" :disabled="!identified || afterDeadline" />
         <v-divider></v-divider>
-        <v-stepper-item :value="3" title="Provinciales" :disabled="!identified" />
+  <v-stepper-item :value="3" title="Provinciales" :disabled="!identified || afterDeadline" />
         <v-divider></v-divider>
-        <v-stepper-item :value="4" title="Bonus y Resumen" :disabled="!identified" />
+  <v-stepper-item :value="4" title="Bonus y Resumen" :disabled="!identified || afterDeadline" />
       </v-stepper-header>
 
       <v-stepper-window>

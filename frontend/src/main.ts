@@ -27,6 +27,29 @@ const router = createRouter({
   routes,
 })
 
+// Guard de deadline: bloquea /play cuando pasó el cierre
+router.beforeEach((to) => {
+  try {
+    const params = new URLSearchParams(globalThis.location?.search || '')
+    const override = params.get('deadline')
+    const simulate = params.get('simulate_deadline')
+    const envDeadline = String(import.meta.env.VITE_DEADLINE || '')
+    let deadline = new Date(envDeadline)
+    if (simulate === '1') deadline = new Date(Date.now() - 1000)
+    else if (override) {
+      const dt = new Date(override)
+      if (!Number.isNaN(dt.getTime())) deadline = dt
+    }
+    const afterDeadline = Date.now() >= deadline.getTime()
+    if (to.path === '/play' && afterDeadline) {
+      return { path: '/', query: { closed: '1' } }
+    }
+  } catch {
+    // noop
+  }
+  return true
+})
+
 const argentinaTheme = {
   dark: false,
   colors: {
