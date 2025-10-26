@@ -28,10 +28,13 @@ MSG_STAFF_ONLY = 'Solo staff'
 
 class MetadataView(APIView):
     def get(self, request: Request):
+        # Convertimos el mapa de sets a listas serializables
+        fpp_raw = get_fuerzas_por_provincia()
+        fpp = {prov: sorted(vals) for prov, vals in fpp_raw.items()}
         return JsonResponse({
             'fuerzas': sorted(get_fuerzas()),
             'provincias': sorted(get_provincias()),
-            'fuerzas_por_provincia': get_fuerzas_por_provincia(),
+            'fuerzas_por_provincia': fpp,
             'deadline': app_settings.DEADLINE,
         })
 
