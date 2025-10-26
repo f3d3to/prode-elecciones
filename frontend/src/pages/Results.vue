@@ -112,6 +112,11 @@ onMounted(async () => {
       total_votes: data.total_votes ?? null,
       provinciales: data.provinciales || {},
     }
+    // Cuando el backend devuelve 200 con payload vacío y un detail,
+    // mostramos el aviso informativo en lugar de renderizar guiones.
+    if (data && data.detail) {
+      error.value = String(data.detail || 'no-results')
+    }
   } catch (e: any) {
     // Guardamos un estado simple para mostrar el aviso informativo
     error.value = e?.response?.data?.detail || 'no-results'

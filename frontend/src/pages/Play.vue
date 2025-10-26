@@ -110,13 +110,13 @@
               </v-card-title>
               <v-card-text>
                 <v-row dense>
-                  <v-col v-for="f in fuerzas" :key="f" cols="12" md="3">
+                  <v-col v-for="f in allowedFor(prov)" :key="f" cols="12" md="3">
                     <v-text-field type="number" min="0" max="100" step="0.1" :label="f" :disabled="afterDeadline"
                       v-model.number="form.provinciales[prov].porcentajes[f]" />
                   </v-col>
                 </v-row>
                 <div class="mt-2" style="max-width: 360px;">
-                  <v-select :items="fuerzas" label="Ganador" v-model="form.provinciales[prov].winner" :disabled="afterDeadline" />
+                  <v-select :items="allowedFor(prov)" label="Ganador" v-model="form.provinciales[prov].winner" :disabled="afterDeadline" />
                 </div>
               </v-card-text>
             </v-card>
@@ -410,4 +410,8 @@ const provsCompleted = computed(() => {
   }
   return n
 })
+
+function allowedFor(prov: string): string[] {
+  return fuerzasPorProvincia.value[prov] || fuerzas.value
+}
 </script>
