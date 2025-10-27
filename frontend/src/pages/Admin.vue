@@ -367,10 +367,31 @@ async function sendResults() {
     publish.msg = 'Resultados cargados correctamente'
     await loadOverview()
   } catch (e: any) {
-    publish.msg = e?.response?.data?.detail || 'Error al cargar resultados (verificar JSON/validaciones)'
+    publish.msg = extractApiError(e) || 'Error al cargar resultados (verificar JSON/validaciones)'
   } finally {
     publish.loading = false
   }
+}
+
+function extractApiError(e: any): string {
+  const data = e?.response?.data
+  if (!data) return e?.message || ''
+  // Backend puede devolver string plano o {detail}
+  if (typeof data === 'string') return data
+  if (typeof data.detail === 'string' && data.detail) return data.detail
+  // Serializers de DRF devuelven objeto de errores por campo
+  if (typeof data === 'object') {
+    const toText = (v: any): string => {
+      if (v == null) return ''
+      if (typeof v === 'string') return v
+      if (Array.isArray(v)) return v.map(toText).filter(Boolean).join(', ')
+      if (typeof v === 'object') return Object.entries(v).map(([k, val]) => `${k}: ${toText(val)}`).filter(Boolean).join('; ')
+      return String(v)
+    }
+    const parts = Object.entries(data).map(([field, msg]) => `${field}: ${toText(msg)}`)
+    return parts.join(' | ')
+  }
+  return ''
 }
 
 async function loadPredictions() {
