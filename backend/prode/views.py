@@ -28,6 +28,7 @@ from rest_framework.authentication import SessionAuthentication
 
 MSG_WAIT_RESULTS = 'A la espera de resultados oficiales'
 MSG_STAFF_ONLY = 'Solo staff'
+MSG_NOT_FOUND = 'No encontrado'
 
 
 class MetadataView(APIView):
@@ -636,7 +637,7 @@ class AdminOfficialResultsView(APIView):
             obj.delete()
             return JsonResponse({'deleted': 1})
         except OfficialResults.DoesNotExist:
-            return JsonResponse({'detail': 'No encontrado'}, status=404)
+            return JsonResponse({'detail': MSG_NOT_FOUND}, status=404)
         except Exception as e:
             return JsonResponse({'detail': f'No se pudo eliminar: {type(e).__name__}: {e}'}, status=400)
 
@@ -644,3 +645,37 @@ class AdminOfficialResultsView(APIView):
 def _is_staff(request: Request) -> bool:
     user = getattr(request, 'user', None)
     return bool(getattr(user, 'is_authenticated', False) and getattr(user, 'is_staff', False))
+
+
+class AdminPredictionDetailView(APIView):
+    """Detalle y edición de una predicción para staff.
+
+    - GET /api/admin/predictions/<id>
+    - PATCH /api/admin/predictions/<id>
+
+    No aplica restricción de deadline; valida usando PredictionSerializer.
+    """
+    authentication_classes = [AdminBearerAuthentication, SessionAuthentication]
+
+    def get(self, request: Request, pid: int):
+        if not _is_staff(request):
+            return HttpResponseForbidden(MSG_STAFF_ONLY)
+        try:
+            obj = Prediction.objects.get(id=pid)
+        except Prediction.DoesNotExist:
+            return JsonResponse({'detail': MSG_NOT_FOUND}, status=404)
+        return JsonResponse(PredictionSerializer(obj).data)
+
+    def patch(self, request: Request, pid: int):
+        if not _is_staff(request):
+            return HttpResponseForbidden(MSG_STAFF_ONLY)
+        try:
+            obj = Prediction.objects.get(id=pid)
+        except Prediction.DoesNotExist:
+            return JsonResponse({'detail': 'No encontrado'}, status=404)
+        data = request.data.copy()
+        serializer = PredictionSerializer(obj, data=data, partial=True)
+        if serializer.is_valid():
+            saved = serializer.save()
+            return JsonResponse(PredictionSerializer(saved).data)
+        return JsonResponse(serializer.errors, status=400)

@@ -88,6 +88,7 @@
                 <td class="text-medium-emphasis">{{ p.email }}</td>
                 <td class="text-medium-emphasis">{{ new Date(p.updated_at).toLocaleString('es-AR') }}</td>
                 <td>
+                  <v-btn size="x-small" color="primary" variant="tonal" class="mr-2" @click="openEdit(p.id)">Editar</v-btn>
                   <v-btn size="x-small" color="error" variant="tonal" @click="deletePrediction(p.id)">Eliminar</v-btn>
                 </td>
               </tr>
@@ -121,6 +122,22 @@
           <v-alert v-else type="info" variant="tonal">Sin resultados cargados</v-alert>
         </v-card-text>
       </v-card>
+
+      <!-- Diálogo de edición de predicción -->
+      <v-dialog v-model="editDlg" max-width="800">
+        <v-card>
+          <v-card-title>Editar predicción #{{ editId }}</v-card-title>
+          <v-card-text>
+            <v-alert v-if="editError" type="error" variant="tonal" class="mb-2">{{ editError }}</v-alert>
+            <v-textarea v-model="editJson" :loading="editLoading" auto-grow rows="14" label="JSON de predicción" hint="Editá y guardá para actualizar" />
+          </v-card-text>
+          <v-card-actions>
+            <v-spacer />
+            <v-btn variant="text" @click="editDlg=false">Cancelar</v-btn>
+            <v-btn color="primary" :loading="editLoading" @click="saveEdit">Guardar</v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
 
       <v-card>
         <v-card-title>Publicar resultados oficiales</v-card-title>
@@ -174,6 +191,19 @@ const purge = reactive({ dry_run: true, include_official: false, purge_all_offic
 const predSearch = ref('')
 const predictions = ref<Array<{id:number,username:string,email:string,updated_at:string}>>([])
 const resultsList = ref<Array<{id:number,is_published:boolean,published_at:string|null,created_at:string}>>([])
+
+// Metadata para construir placeholders correctos
+const metaLoaded = ref(false)
+const metaFuerzas = ref<string[]>([])
+const metaProvincias = ref<string[]>([])
+const metaFpp = ref<Record<string, string[]>>({})
+
+// Edición de predicción
+const editDlg = ref(false)
+const editId = ref<number | null>(null)
+const editJson = ref('')
+const editLoading = ref(false)
+const editError = ref('')
 
 async function fetchCsrf() {
   try {
@@ -247,6 +277,20 @@ async function loadOverview() {
     Object.assign(overview, data)
   } catch (e: any) {
     lastAction.value = e?.message || 'No se pudo cargar overview'
+  }
+}
+
+async function loadMetadataIfNeeded() {
+  if (metaLoaded.value) return
+  try {
+    const { data } = await axios.get(`${base}/api/metadata`)
+    metaFuerzas.value = data?.fuerzas || []
+    metaProvincias.value = data?.provincias || []
+    metaFpp.value = data?.fuerzas_por_provincia || {}
+    metaLoaded.value = true
+  } catch {
+    // Si falla metadata, seguimos con lo que haya
+    metaLoaded.value = true
   }
 }
 
@@ -348,6 +392,114 @@ async function deletePrediction(id: number) {
   }
 }
 
+async function openEdit(id: number) {
+  editError.value = ''
+  editLoading.value = true
+  editId.value = id
+  editJson.value = ''
+  editDlg.value = true
+  try {
+    await loadMetadataIfNeeded()
+    const { data } = await axios.get(`${base}/api/admin/predictions/${id}`, { withCredentials: true, headers: authHeaders() })
+    const templ = buildPredictionTemplate(data)
+    editJson.value = JSON.stringify(templ, null, 2)
+  } catch (e: any) {
+    editError.value = e?.response?.data?.detail || 'No se pudo cargar la predicción'
+  } finally {
+    editLoading.value = false
+  }
+}
+
+async function saveEdit() {
+  if (!editId.value) return
+  editLoading.value = true
+  editError.value = ''
+  try {
+    await fetchCsrf()
+    const body = JSON.parse(editJson.value || '{}')
+    const headers = { ...csrfHeaders(), ...authHeaders() }
+  await axios.patch(`${base}/api/admin/predictions/${editId.value}`, body, { withCredentials: true, headers })
+    // Refrescar lista
+    await loadPredictions()
+    lastAction.value = `Predicción ${editId.value} actualizada`
+    editDlg.value = false
+  } catch (e: any) {
+    editError.value = e?.response?.data?.detail || JSON.stringify(e?.response?.data || 'Error al guardar edición')
+  } finally {
+    editLoading.value = false
+  }
+}
+
+function allowedForProv(prov: string, fallbackFuerzas: string[]): string[] {
+  const arr = metaFpp.value?.[prov]
+  return (arr && arr.length) ? arr : fallbackFuerzas
+}
+
+function normalizeNat(fuerzas: string[], natSrc: Record<string, any>): Record<string, number> {
+  const out: Record<string, number> = {}
+  for (const f of fuerzas) {
+    const v = Number(natSrc?.[f])
+    out[f] = Number.isFinite(v) ? v : 0
+  }
+  return out
+}
+
+function buildProvRow(allowed: string[], src: any): { porcentajes: Record<string, number>, winner?: string } {
+  const srcPerc = src?.porcentajes || src?.percentages || {}
+  const row: any = { porcentajes: {} }
+  for (const f of allowed) {
+    const v = Number(srcPerc[f])
+    row.porcentajes[f] = Number.isFinite(v) ? v : 0
+  }
+  const win = src?.winner
+  if (win && allowed.includes(win)) row.winner = win
+  return row
+}
+
+function normalizeBonus(bonusSrc: any) {
+  return {
+    mas_renida: bonusSrc?.mas_renida ?? undefined,
+    cambia_ganador: bonusSrc?.cambia_ganador ?? undefined,
+    fit_mayor: bonusSrc?.fit_mayor ?? undefined,
+    lla_mas_crece: bonusSrc?.lla_mas_crece ?? undefined,
+    fuerza_patria_mayor: bonusSrc?.fuerza_patria_mayor ?? undefined,
+  }
+}
+
+function buildPredictionTemplate(pred: any) {
+  const fuerzas: string[] = metaFuerzas.value?.length ? metaFuerzas.value : Object.keys(pred?.national_percentages || {})
+  const provincias: string[] = metaProvincias.value?.length ? metaProvincias.value : Object.keys(pred?.provinciales || {})
+
+  const nat = normalizeNat(fuerzas, pred?.national_percentages || {})
+
+  const provinciales: Record<string, { porcentajes: Record<string, number>, winner?: string }> = {}
+  const provSrc = pred?.provinciales || {}
+  for (const prov of provincias) {
+    const allowed = allowedForProv(prov, fuerzas)
+    const src = provSrc?.[prov] || {}
+    provinciales[prov] = buildProvRow(allowed, src)
+  }
+
+  const bonus = normalizeBonus(pred?.bonus || {})
+
+  return {
+    id: pred?.id,
+    username: pred?.username || '',
+    email: pred?.email || '',
+    top3: Array.isArray(pred?.top3) ? pred.top3 : [],
+    national_percentages: nat,
+    participation: pred?.participation ?? null,
+    margin_1_2: pred?.margin_1_2 ?? null,
+    blanco_nulo_impugnado: pred?.blanco_nulo_impugnado ?? null,
+    total_votes: pred?.total_votes ?? null,
+    provinciales,
+    bonus,
+    created_at: pred?.created_at,
+    updated_at: pred?.updated_at,
+    sync_pending: !!pred?.sync_pending,
+  }
+}
+
 async function loadResultsList() {
   try {
     const { data } = await axios.get(`${base}/api/admin/results`, { withCredentials: true, headers: authHeaders() })
@@ -373,6 +525,7 @@ onMounted(async () => {
     await loadOverview()
     await loadPredictions()
     await loadResultsList()
+    await loadMetadataIfNeeded()
   }
 })
 </script>

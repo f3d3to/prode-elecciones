@@ -4,7 +4,7 @@ from .views import (
     OfficialResultsView, RankingView,
     AdminCsrfView, AdminLoginView, AdminLogoutView, AdminOverviewView, AdminReprocessView, AdminExportRankingCsvView, AdminRetrySheetsView, AdminPurgeTestDataView,
     AdminTokenView,
-    AdminPredictionsView, AdminOfficialResultsView,
+    AdminPredictionsView, AdminOfficialResultsView, AdminPredictionDetailView,
 )
 
 urlpatterns = [
@@ -26,5 +26,6 @@ urlpatterns = [
     path('admin/retry-sheets', AdminRetrySheetsView.as_view()),
     path('admin/purge', AdminPurgeTestDataView.as_view()),
     path('admin/predictions', AdminPredictionsView.as_view()),
+    path('admin/predictions/<int:pid>', AdminPredictionDetailView.as_view()),
     path('admin/results', AdminOfficialResultsView.as_view()),
 ]
