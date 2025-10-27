@@ -32,9 +32,7 @@ class PredictionSerializer(serializers.ModelSerializer):
             self._assert_range(fv, 0, 100, field="national_percentages", key=k)
             total += fv
         if not (95 <= total <= 105):
-            raise serializers.ValidationError({"national_percentages": f"La suma es {round(total, 2)}; debería estar cerca de 100% (95-105)"})
-
-    def _validate_top3(self, data):
+            raise serializers.ValidationError({"national_percentages": f"La suma es {round(total,2)}; debería estar cerca de 100% (95-105)"})
         t3 = data.get('top3') or []
         if len(t3) > 3:
             raise serializers.ValidationError({"top3": "Top-3 debe tener hasta 3 fuerzas"})
